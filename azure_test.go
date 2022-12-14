@@ -17,7 +17,7 @@ import (
 // This file is on my private account. For testing you'll have to upload your
 // own version.
 const (
-	azPublicBucket    = "saipubbucketestingonly"
+	azPublicBucket    = "saipubbuckettestingonly"
 	azPublicContainer = "testcontainer"
 	azPublicBlob      = "small.csv"
 )
