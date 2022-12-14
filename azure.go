@@ -250,7 +250,7 @@ func (sc *azSeekCloser) close() error {
 
 var blobPattern = regexp.MustCompile(`(https|abs)://([^/\.]+)(\.blob\.core\.windows\.net)/(.*)/(.*)`)
 
-func parseAzBlobName(url string) (bucket, container, blob string) {
+func parseAzBlobName(url string) (storageAccount, container, blob string) {
 	i := blobPattern.FindStringSubmatchIndex(url)
 	if i[2] == -1 {
 		return "", "", ""
