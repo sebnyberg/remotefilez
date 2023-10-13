@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"regexp"
 	"sync"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"golang.org/x/exp/constraints"
 )
 
@@ -19,7 +19,7 @@ var (
 	ErrInvalidBlobURL = errors.New("invalid blob url")
 )
 
-type azSeekCloser struct {
+type azReadSeekCloser struct {
 	blob        *blob.Client
 	resp        *blob.DownloadStreamResponse
 	mtx         sync.Mutex
@@ -69,11 +69,11 @@ func NewAzureBlobReadSeekCloser(
 	}
 
 	// Init
-	var sc azSeekCloser
+	var sc azReadSeekCloser
 	sc.n = *resp.ContentLength
 	sc.blob = blobClient
 	sc.readTimeout = readTimeout
-	if _, err := sc.Seek(0, os.SEEK_SET); err != nil {
+	if _, err := sc.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
 
@@ -106,7 +106,7 @@ func NewAzureBlobReadSeekCloser(
 // nothing happened; in particular it does not indicate EOF.
 //
 // Implementations must not retain p.
-func (sc *azSeekCloser) Read(p []byte) (n int, err error) {
+func (sc *azReadSeekCloser) Read(p []byte) (n int, err error) {
 	sc.mtx.Lock()
 	defer sc.mtx.Unlock()
 	return sc.read(p)
@@ -114,7 +114,7 @@ func (sc *azSeekCloser) Read(p []byte) (n int, err error) {
 
 // read is a concurrency-unsafe version of .Read(). You must hold sc.mtx before
 // calling this function.
-func (sc *azSeekCloser) read(p []byte) (n int, err error) {
+func (sc *azReadSeekCloser) read(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -152,7 +152,7 @@ func (sc *azSeekCloser) read(p []byte) (n int, err error) {
 // Seeking to any positive offset may be allowed, but if the new offset exceeds
 // the size of the underlying object the behavior of subsequent I/O operations
 // is implementation-dependent.
-func (sc *azSeekCloser) Seek(offset int64, whence int) (int64, error) {
+func (sc *azReadSeekCloser) Seek(offset int64, whence int) (int64, error) {
 	sc.mtx.Lock()
 	defer sc.mtx.Unlock()
 	return sc.seek(offset, whence)
@@ -160,7 +160,7 @@ func (sc *azSeekCloser) Seek(offset int64, whence int) (int64, error) {
 
 // seek is a concurrency-unsafe version of .Seek(). You must hold sc.mtx before
 // calling this function.
-func (sc *azSeekCloser) seek(offset int64, whence int) (int64, error) {
+func (sc *azReadSeekCloser) seek(offset int64, whence int) (int64, error) {
 	switch whence {
 	case io.SeekStart:
 
@@ -230,7 +230,7 @@ func (sc *azSeekCloser) seek(offset int64, whence int) (int64, error) {
 }
 
 // Close closes the underlying blob connection.
-func (sc *azSeekCloser) Close() error {
+func (sc *azReadSeekCloser) Close() error {
 	sc.mtx.Lock()
 	defer sc.mtx.Unlock()
 	return sc.close()
@@ -238,7 +238,7 @@ func (sc *azSeekCloser) Close() error {
 
 // close is a concurrency-unsafe version of .Close(). You must hold sc.mtx before
 // calling this function.
-func (sc *azSeekCloser) close() error {
+func (sc *azReadSeekCloser) close() error {
 	if sc.resp != nil {
 		r := sc.resp
 		sc.resp = nil
@@ -246,6 +246,81 @@ func (sc *azSeekCloser) close() error {
 		return r.Body.Close()
 	}
 	return nil
+}
+
+type azWriteCloser struct {
+	blob         *blockblob.Client
+	mtx          sync.Mutex
+	n            int64
+	err          error
+	writeTimeout time.Duration
+	w            io.WriteCloser
+}
+
+// NewAzureBlobWriteCloser returns an io.WriteCloser that can be used to write
+// to an Azure Blob.
+func NewAzureBlobWriteCloser(
+	url string,
+	creds azcore.TokenCredential,
+	retryTimeout time.Duration,
+	openCtx context.Context,
+) (io.WriteCloser, error) {
+	if creds == nil {
+		return nil, errors.New("nil credentials")
+	}
+	bucketName, containerName, blobName := parseAzBlobName(url)
+	if bucketName == "" {
+		return nil, fmt.Errorf("%w, missing bucket name", ErrInvalidBlobURL)
+	}
+	if containerName == "" {
+		return nil, fmt.Errorf("%w, missing container name", ErrInvalidBlobURL)
+	}
+	if blobName == "" {
+		return nil, fmt.Errorf("%w, missing blob name", ErrInvalidBlobURL)
+	}
+
+	// Initialize client
+	blobURL := fmt.Sprintf("https://%v.blob.core.windows.net/%v/%v",
+		bucketName, containerName, blobName)
+	var clientOpts blockblob.ClientOptions
+	clientOpts.Retry.TryTimeout = retryTimeout
+	blobClient, err := blockblob.NewClient(blobURL, creds, &clientOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	// Init
+	var sc azWriteCloser
+	sc.blob = blobClient
+	sc.writeTimeout = retryTimeout
+
+	r, w := io.Pipe()
+	go func() {
+		_, err := blobClient.UploadStream(nil, r, nil)
+		if err != nil {
+			sc.mtx.Lock()
+			defer sc.mtx.Unlock()
+			sc.err = err
+			return
+		}
+	}()
+	sc.w = w
+
+	return &sc, nil
+}
+
+// Write implements io.Writer
+func (sc *azWriteCloser) Write(p []byte) (n int, err error) {
+	sc.mtx.Lock()
+	defer sc.mtx.Unlock()
+	return sc.w.Write(p)
+}
+
+// Close closes the underlying blob connection.
+func (sc *azWriteCloser) Close() error {
+	sc.mtx.Lock()
+	defer sc.mtx.Unlock()
+	return sc.w.Close()
 }
 
 var blobPattern = regexp.MustCompile(`(https|abs)://([^/\.]+)(\.blob\.core\.windows\.net)/(.*)/(.*)`)
