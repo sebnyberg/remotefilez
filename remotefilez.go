@@ -42,25 +42,29 @@ func (ro Opener) WithAzureResolver(
 }
 
 // Open returns an io.ReadSeekCloser handle from the provided file URL.
+//
+// Depecated: Use OpenReader instead.
 func (ro *Opener) Open(fileURL string) (io.ReadSeekCloser, error) {
 	return ro.OpenReader(fileURL)
 }
 
 // OpenCtx returns an io.ReadSeekCloser handle from the provided file URL.
 // Errors if a resolver for the provided schema is not registered.
-func (ro *Opener) OpenCtx(fileURL string, ctx context.Context) (io.ReadSeekCloser, error) {
-	return ro.OpenReaderCtx(fileURL, ctx)
+//
+// Depecated: Use OpenReaderCtx instead.
+func (ro *Opener) OpenCtx(ctx context.Context, fileURL string) (io.ReadSeekCloser, error) {
+	return ro.OpenReaderCtx(ctx, fileURL)
 }
 
 // OpenReader returns an io.ReadSeekCloser handle from the provided file URL.
 func (ro *Opener) OpenReader(fileURL string) (io.ReadSeekCloser, error) {
 	ctx := context.Background()
-	return ro.OpenCtx(fileURL, ctx)
+	return ro.OpenCtx(ctx, fileURL)
 }
 
 // OpenReaderCtx returns an io.ReadSeekCloser handle from the provided file URL.
 // Errors if a resolver for the provided schema is not registered.
-func (ro *Opener) OpenReaderCtx(fileURL string, ctx context.Context) (io.ReadSeekCloser, error) {
+func (ro *Opener) OpenReaderCtx(ctx context.Context, fileURL string) (io.ReadSeekCloser, error) {
 	u, err := url.Parse(fileURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse URL failed, %w", err)
@@ -87,12 +91,12 @@ func (ro *Opener) OpenReaderCtx(fileURL string, ctx context.Context) (io.ReadSee
 // Open returns an io.ReadSeekCloser handle from the provided file URL.
 func (ro *Opener) OpenWriter(fileURL string) (io.WriteCloser, error) {
 	ctx := context.Background()
-	return ro.OpenWriterCtx(fileURL, ctx)
+	return ro.OpenWriterCtx(ctx, fileURL)
 }
 
 // OpenCtx returns an io.ReadSeekCloser handle from the provided file URL.
 // Errors if a resolver for the provided schema is not registered.
-func (ro *Opener) OpenWriterCtx(fileURL string, ctx context.Context) (io.WriteCloser, error) {
+func (ro *Opener) OpenWriterCtx(ctx context.Context, fileURL string) (io.WriteCloser, error) {
 	u, err := url.Parse(fileURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse URL failed, %w", err)

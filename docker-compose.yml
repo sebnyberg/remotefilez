@@ -1,0 +1,23 @@
+version: "3.4"
+
+services:
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    ports:
+      - "10000:10000" # Blob endpoint
+    volumes:
+      - ./testdata:/testdata
+    command:
+      - azurite
+      - --oauth
+      - basic
+      - --blobHost
+      - 0.0.0.0
+      - --cert
+      - /testdata/0.0.0.0.pem
+      - --key
+      - /testdata/0.0.0.0-key.pem
+    environment:
+      - AZURITE_ACCOUNTS=dev:c2VjcmV0a2V5Cg==
+# volumes:
+#   azurite-data:

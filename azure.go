@@ -33,7 +33,7 @@ func NewAzureBlobReadSeekCloser(
 	blobURL string,
 	creds azcore.TokenCredential,
 	readTimeout time.Duration,
-	openCtx context.Context,
+	ctx context.Context,
 ) (io.ReadSeekCloser, error) {
 	if creds == nil {
 		return nil, errors.New("nil credentials")
@@ -53,7 +53,7 @@ func NewAzureBlobReadSeekCloser(
 	}
 
 	// Retrieve blob size
-	resp, err := blobClient.GetProperties(openCtx, nil)
+	resp, err := blobClient.GetProperties(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +256,7 @@ func NewAzureBlobWriteCloser(
 	blobURL string,
 	creds azcore.TokenCredential,
 	retryTimeout time.Duration,
-	openCtx context.Context,
+	ctx context.Context,
 ) (io.WriteCloser, error) {
 	if creds == nil {
 		return nil, errors.New("nil credentials")
@@ -282,7 +282,7 @@ func NewAzureBlobWriteCloser(
 
 	r, w := io.Pipe()
 	go func() {
-		_, err := blobClient.UploadStream(nil, r, nil)
+		_, err := blobClient.UploadStream(ctx, r, nil)
 		if err != nil {
 			sc.mtx.Lock()
 			defer sc.mtx.Unlock()
@@ -306,7 +306,11 @@ func (sc *azWriteCloser) Write(p []byte) (n int, err error) {
 func (sc *azWriteCloser) Close() error {
 	sc.mtx.Lock()
 	defer sc.mtx.Unlock()
-	return sc.w.Close()
+	closeErr := sc.w.Close()
+	if sc.err != nil {
+		return sc.err
+	}
+	return closeErr
 }
 
 var blobPattern = regexp.MustCompile(`(https|abs)://([^/\.]+)(\.blob\.core\.windows\.net)/(.*)/(.*)`)
