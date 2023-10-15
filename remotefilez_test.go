@@ -1,6 +1,7 @@
 package remotefilez_test
 
 import (
+	"io"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -34,14 +35,14 @@ func TestLocal(t *testing.T) {
 		// Read with reqular os.Open
 		wantf, err := os.Open(fpath)
 		require.NoError(t, err)
-		want, err := ioutil.ReadAll(wantf)
+		want, err := io.ReadAll(wantf)
 		require.NoError(t, err)
 
 		// Read with remotefilez opener
 		var p remotefilez.Opener
 		f, err := p.Open(furi)
 		require.NoError(t, err)
-		actual, err := ioutil.ReadAll(f)
+		actual, err := io.ReadAll(f)
 		require.NoError(t, err)
 		require.Equal(t, want, actual)
 	})
