@@ -15,11 +15,18 @@ import (
 	"golang.org/x/exp/constraints"
 )
 
+// Interface guards
+var _ io.Closer = (*azReader)(nil)
+var _ io.Reader = (*azReader)(nil)
+var _ io.ReaderAt = (*azReader)(nil)
+var _ io.Closer = (*azWriter)(nil)
+var _ io.Writer = (*azWriter)(nil)
+
 var (
 	ErrInvalidBlobURL = errors.New("invalid blob url")
 )
 
-type azReadSeekCloser struct {
+type azReader struct {
 	blob        *blob.Client
 	resp        *blob.DownloadStreamResponse
 	mtx         sync.Mutex
@@ -29,12 +36,12 @@ type azReadSeekCloser struct {
 	readTimeout time.Duration
 }
 
-func NewAzureBlobReadSeekCloser(
+func NewAzureBlobReader(
 	blobURL string,
 	creds azcore.TokenCredential,
 	readTimeout time.Duration,
 	ctx context.Context,
-) (io.ReadSeekCloser, error) {
+) (*azReader, error) {
 	if creds == nil {
 		return nil, errors.New("nil credentials")
 	}
@@ -62,7 +69,7 @@ func NewAzureBlobReadSeekCloser(
 	}
 
 	// Init
-	var sc azReadSeekCloser
+	var sc azReader
 	sc.n = *resp.ContentLength
 	sc.blob = blobClient
 	sc.readTimeout = readTimeout
@@ -99,7 +106,7 @@ func NewAzureBlobReadSeekCloser(
 // nothing happened; in particular it does not indicate EOF.
 //
 // Implementations must not retain p.
-func (sc *azReadSeekCloser) Read(p []byte) (n int, err error) {
+func (sc *azReader) Read(p []byte) (n int, err error) {
 	sc.mtx.Lock()
 	defer sc.mtx.Unlock()
 	return sc.read(p)
@@ -107,7 +114,7 @@ func (sc *azReadSeekCloser) Read(p []byte) (n int, err error) {
 
 // read is a concurrency-unsafe version of .Read(). You must hold sc.mtx before
 // calling this function.
-func (sc *azReadSeekCloser) read(p []byte) (n int, err error) {
+func (sc *azReader) read(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -132,6 +139,19 @@ func (sc *azReadSeekCloser) read(p []byte) (n int, err error) {
 	return n, nil
 }
 
+func (sc *azReader) ReadAt(p []byte, off int64) (n int, err error) {
+	sc.mtx.Lock()
+	defer sc.mtx.Unlock()
+	if off == sc.off {
+		// fastpath
+		return sc.read(p)
+	}
+	if _, err := sc.seek(off, io.SeekStart); err != nil {
+		return 0, err
+	}
+	return sc.read(p)
+}
+
 // Seek sets the offset for the next Read or Write to offset,
 // interpreted according to whence:
 // SeekStart means relative to the start of the file,
@@ -145,7 +165,7 @@ func (sc *azReadSeekCloser) read(p []byte) (n int, err error) {
 // Seeking to any positive offset may be allowed, but if the new offset exceeds
 // the size of the underlying object the behavior of subsequent I/O operations
 // is implementation-dependent.
-func (sc *azReadSeekCloser) Seek(offset int64, whence int) (int64, error) {
+func (sc *azReader) Seek(offset int64, whence int) (int64, error) {
 	sc.mtx.Lock()
 	defer sc.mtx.Unlock()
 	return sc.seek(offset, whence)
@@ -153,7 +173,7 @@ func (sc *azReadSeekCloser) Seek(offset int64, whence int) (int64, error) {
 
 // seek is a concurrency-unsafe version of .Seek(). You must hold sc.mtx before
 // calling this function.
-func (sc *azReadSeekCloser) seek(offset int64, whence int) (int64, error) {
+func (sc *azReader) seek(offset int64, whence int) (int64, error) {
 	switch whence {
 	case io.SeekStart:
 
@@ -223,7 +243,7 @@ func (sc *azReadSeekCloser) seek(offset int64, whence int) (int64, error) {
 }
 
 // Close closes the underlying blob connection.
-func (sc *azReadSeekCloser) Close() error {
+func (sc *azReader) Close() error {
 	sc.mtx.Lock()
 	defer sc.mtx.Unlock()
 	return sc.close()
@@ -231,7 +251,7 @@ func (sc *azReadSeekCloser) Close() error {
 
 // close is a concurrency-unsafe version of .Close(). You must hold sc.mtx before
 // calling this function.
-func (sc *azReadSeekCloser) close() error {
+func (sc *azReader) close() error {
 	if sc.resp != nil {
 		r := sc.resp
 		sc.resp = nil
@@ -241,7 +261,7 @@ func (sc *azReadSeekCloser) close() error {
 	return nil
 }
 
-type azWriteCloser struct {
+type azWriter struct {
 	blob         *blockblob.Client
 	mtx          sync.Mutex
 	n            int64
@@ -257,7 +277,7 @@ func NewAzureBlobWriteCloser(
 	creds azcore.TokenCredential,
 	retryTimeout time.Duration,
 	ctx context.Context,
-) (io.WriteCloser, error) {
+) (*azWriter, error) {
 	if creds == nil {
 		return nil, errors.New("nil credentials")
 	}
@@ -276,7 +296,7 @@ func NewAzureBlobWriteCloser(
 	}
 
 	// Init
-	var sc azWriteCloser
+	var sc azWriter
 	sc.blob = blobClient
 	sc.writeTimeout = retryTimeout
 
@@ -296,14 +316,14 @@ func NewAzureBlobWriteCloser(
 }
 
 // Write implements io.Writer
-func (sc *azWriteCloser) Write(p []byte) (n int, err error) {
+func (sc *azWriter) Write(p []byte) (n int, err error) {
 	sc.mtx.Lock()
 	defer sc.mtx.Unlock()
 	return sc.w.Write(p)
 }
 
 // Close closes the underlying blob connection.
-func (sc *azWriteCloser) Close() error {
+func (sc *azWriter) Close() error {
 	sc.mtx.Lock()
 	defer sc.mtx.Unlock()
 	closeErr := sc.w.Close()

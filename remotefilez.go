@@ -12,6 +12,11 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 )
 
+type ReaderAtSeekCloser interface {
+	io.ReaderAt
+	io.ReadSeekCloser
+}
+
 const (
 	schemeFile  = "file"
 	schemeAzure = "abs"
@@ -44,7 +49,7 @@ func (ro Opener) WithAzureResolver(
 // Open returns an io.ReadSeekCloser handle from the provided file URL.
 //
 // Depecated: Use OpenReader instead.
-func (ro *Opener) Open(fileURL string) (io.ReadSeekCloser, error) {
+func (ro *Opener) Open(fileURL string) (ReaderAtSeekCloser, error) {
 	return ro.OpenReader(fileURL)
 }
 
@@ -52,19 +57,19 @@ func (ro *Opener) Open(fileURL string) (io.ReadSeekCloser, error) {
 // Errors if a resolver for the provided schema is not registered.
 //
 // Depecated: Use OpenReaderCtx instead.
-func (ro *Opener) OpenCtx(ctx context.Context, fileURL string) (io.ReadSeekCloser, error) {
+func (ro *Opener) OpenCtx(ctx context.Context, fileURL string) (ReaderAtSeekCloser, error) {
 	return ro.OpenReaderCtx(ctx, fileURL)
 }
 
 // OpenReader returns an io.ReadSeekCloser handle from the provided file URL.
-func (ro *Opener) OpenReader(fileURL string) (io.ReadSeekCloser, error) {
+func (ro *Opener) OpenReader(fileURL string) (ReaderAtSeekCloser, error) {
 	ctx := context.Background()
 	return ro.OpenCtx(ctx, fileURL)
 }
 
 // OpenReaderCtx returns an io.ReadSeekCloser handle from the provided file URL.
 // Errors if a resolver for the provided schema is not registered.
-func (ro *Opener) OpenReaderCtx(ctx context.Context, fileURL string) (io.ReadSeekCloser, error) {
+func (ro *Opener) OpenReaderCtx(ctx context.Context, fileURL string) (ReaderAtSeekCloser, error) {
 	u, err := url.Parse(fileURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse URL failed, %w", err)
@@ -82,7 +87,7 @@ func (ro *Opener) OpenReaderCtx(ctx context.Context, fileURL string) (io.ReadSee
 		if ro.azcreds == nil {
 			return nil, errors.New("missing credentials please add AzureResolver")
 		}
-		return NewAzureBlobReadSeekCloser(fileURL, ro.azcreds, ro.aztimout, ctx)
+		return NewAzureBlobReader(fileURL, ro.azcreds, ro.aztimout, ctx)
 	default:
 		return nil, fmt.Errorf("%w %q", ErrUnsupportedScheme, u.Scheme)
 	}
