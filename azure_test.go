@@ -214,8 +214,3 @@ func TestAzureReadSeekCloser(t *testing.T) {
 	}
 }
 
-type ByteComparer struct {
-	buf []byte
-	i   int
-	j   int
-}
