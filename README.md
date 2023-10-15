@@ -1,6 +1,8 @@
 # remotefilez
 
-Open handles to various (local and Azure) file URLs as an `io.ReadSeekCloser`.
+Sensible defaults handles to various (local and Azure) file URLs as `io.ReadSeekCloser` and `io.WriteCloser`.
+
+`io.WriteSeekCloser` is not supported at the moment.
 
 This package is experimental. Do not use it for production workloads.
 
@@ -12,7 +14,7 @@ properly.
 ```go
 var ro remotefilez.Opener
 
-localfile, err := ro.Open("file:///path/to/local/file.txt")
+localfile, err := ro.OpenReader("file:///path/to/local/file.txt")
 if err != nil { ... }
 
 defer localfile.Close()
@@ -39,12 +41,28 @@ blobURL := fmt.Sprintf(
 )
 
 bgCtx := context.Background()
-openCtx, cancel := context.WithTimeout(bgCtx, time.Second*10)
+ctx, cancel := context.WithTimeout(bgCtx, time.Second*10)
 defer cancel()
-azfile, err := ro.OpenCtx(blobURL, ctx)
+
+// Upload ./somefile.txt to path/to/blob.txt
+f, err := os.Open("somefile.txt")
 if err != nil { ... }
 
-defer azfile.Close()
-contents, err := ioutil.ReadAll(azfile)
+azwrite, err := ro.OpenWriterCtx(blobURL, ctx)
+if err != nil { ... }
+
+// Copy
+_, err = io.Copy(azwrite, f)
+if err != nil { ... }
+err = azwrite.Close() // IMPORTANT!
+if err != nil { ... }
+
+// Read blob contents
+azread, err := ro.OpenReaderCtx(blobURL, ctx)
+if err != nil { ... }
+
+contents, err := ioutil.ReadAll(azread)
+if err != nil { ... }
+err = azread.Close()
 if err != nil { ... }
 ```
