@@ -3,8 +3,8 @@ package remotefilez
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
+	"net/url"
 	"regexp"
 	"sync"
 	"time"
@@ -30,7 +30,7 @@ type azReadSeekCloser struct {
 }
 
 func NewAzureBlobReadSeekCloser(
-	url string,
+	blobURL string,
 	creds azcore.TokenCredential,
 	readTimeout time.Duration,
 	openCtx context.Context,
@@ -38,23 +38,16 @@ func NewAzureBlobReadSeekCloser(
 	if creds == nil {
 		return nil, errors.New("nil credentials")
 	}
-	bucketName, containerName, blobName := parseAzBlobName(url)
-	if bucketName == "" {
-		return nil, fmt.Errorf("%w, missing bucket name", ErrInvalidBlobURL)
+	u, err := url.Parse(blobURL)
+	if err != nil {
+		return nil, ErrInvalidBlobURL
 	}
-	if containerName == "" {
-		return nil, fmt.Errorf("%w, missing container name", ErrInvalidBlobURL)
-	}
-	if blobName == "" {
-		return nil, fmt.Errorf("%w, missing blob name", ErrInvalidBlobURL)
-	}
+	u.Scheme = "https"
 
 	// Initialize client
-	blobURL := fmt.Sprintf("https://%v.blob.core.windows.net/%v/%v",
-		bucketName, containerName, blobName)
 	var clientOpts blob.ClientOptions
 	clientOpts.Retry.TryTimeout = readTimeout
-	blobClient, err := blob.NewClient(blobURL, creds, &clientOpts)
+	blobClient, err := blob.NewClient(u.String(), creds, &clientOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +253,7 @@ type azWriteCloser struct {
 // NewAzureBlobWriteCloser returns an io.WriteCloser that can be used to write
 // to an Azure Blob.
 func NewAzureBlobWriteCloser(
-	url string,
+	blobURL string,
 	creds azcore.TokenCredential,
 	retryTimeout time.Duration,
 	openCtx context.Context,
@@ -268,23 +261,16 @@ func NewAzureBlobWriteCloser(
 	if creds == nil {
 		return nil, errors.New("nil credentials")
 	}
-	bucketName, containerName, blobName := parseAzBlobName(url)
-	if bucketName == "" {
-		return nil, fmt.Errorf("%w, missing bucket name", ErrInvalidBlobURL)
+	u, err := url.Parse(blobURL)
+	if err != nil {
+		return nil, ErrInvalidBlobURL
 	}
-	if containerName == "" {
-		return nil, fmt.Errorf("%w, missing container name", ErrInvalidBlobURL)
-	}
-	if blobName == "" {
-		return nil, fmt.Errorf("%w, missing blob name", ErrInvalidBlobURL)
-	}
+	u.Scheme = "https"
 
 	// Initialize client
-	blobURL := fmt.Sprintf("https://%v.blob.core.windows.net/%v/%v",
-		bucketName, containerName, blobName)
 	var clientOpts blockblob.ClientOptions
 	clientOpts.Retry.TryTimeout = retryTimeout
-	blobClient, err := blockblob.NewClient(blobURL, creds, &clientOpts)
+	blobClient, err := blockblob.NewClient(u.String(), creds, &clientOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -324,20 +310,6 @@ func (sc *azWriteCloser) Close() error {
 }
 
 var blobPattern = regexp.MustCompile(`(https|abs)://([^/\.]+)(\.blob\.core\.windows\.net)/(.*)/(.*)`)
-
-func parseAzBlobName(url string) (storageAccount, container, blob string) {
-	i := blobPattern.FindStringSubmatchIndex(url)
-	if i[2] == -1 {
-		return "", "", ""
-	}
-	if i[6] == -1 {
-		return "", "", ""
-	}
-	if i[8] == -1 {
-		return "", "", ""
-	}
-	return url[i[4]:i[5]], url[i[8]:i[9]], url[i[10]:i[11]]
-}
 
 func min[T constraints.Ordered](a, b T) T {
 	if a < b {
