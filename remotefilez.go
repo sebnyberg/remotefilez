@@ -32,8 +32,8 @@ var (
 // Opener provides a unified interface for resolving io.ReadSeekClosers from
 // URLs.
 type Opener struct {
-	azcreds  azcore.TokenCredential
-	aztimout time.Duration
+	azcreds       azcore.TokenCredential
+	azOpenTimeout time.Duration
 }
 
 // WithAzureResolver returns a copy of the Opener with the provided Azure
@@ -43,7 +43,7 @@ func (ro Opener) WithAzureResolver(
 	timeout time.Duration,
 ) *Opener {
 	ro.azcreds = creds
-	ro.aztimout = timeout
+	ro.azOpenTimeout = timeout
 	return &ro
 }
 
@@ -92,7 +92,7 @@ func (ro *Opener) OpenReaderCtx(ctx context.Context, fileURL string) (ReaderAtSe
 		if ro.azcreds == nil {
 			return nil, errors.New("missing credentials please add AzureResolver")
 		}
-		return NewAzureBlobReader(fileURL, ro.azcreds, ro.aztimout, ctx)
+		return NewAzureBlobReader(fileURL, ro.azcreds, ro.azOpenTimeout, ctx)
 	default:
 		return nil, fmt.Errorf("%w %q", ErrUnsupportedScheme, u.Scheme)
 	}
@@ -124,7 +124,7 @@ func (ro *Opener) OpenWriterCtx(ctx context.Context, fileURL string) (io.WriteCl
 		if ro.azcreds == nil {
 			return nil, errors.New("missing credentials please add AzureResolver")
 		}
-		return NewAzureBlobWriteCloser(fileURL, ro.azcreds, ro.aztimout, ctx)
+		return NewAzureBlobWriteCloser(fileURL, ro.azcreds, ro.azOpenTimeout, ctx)
 	default:
 		return nil, fmt.Errorf("%w %q", ErrUnsupportedScheme, u.Scheme)
 	}

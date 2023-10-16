@@ -28,19 +28,19 @@ var (
 )
 
 type azReader struct {
-	blob        *blob.Client
-	resp        *blob.DownloadStreamResponse
-	mtx         sync.Mutex
-	n           int64
-	off         int64
-	err         error
-	readTimeout time.Duration
+	blob *blob.Client
+	resp *blob.DownloadStreamResponse
+	mtx  sync.Mutex
+	n    int64
+	off  int64
+	err  error
+	ctx  context.Context
 }
 
 func NewAzureBlobReader(
 	blobURL string,
 	creds azcore.TokenCredential,
-	readTimeout time.Duration,
+	openTimeout time.Duration,
 	ctx context.Context,
 ) (*azReader, error) {
 	if creds == nil {
@@ -54,7 +54,7 @@ func NewAzureBlobReader(
 
 	// Initialize client
 	var clientOpts blob.ClientOptions
-	clientOpts.Retry.TryTimeout = readTimeout
+	clientOpts.Retry.TryTimeout = openTimeout
 	blobClient, err := blob.NewClient(u.String(), creds, &clientOpts)
 	if err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func NewAzureBlobReader(
 	var sc azReader
 	sc.n = *resp.ContentLength
 	sc.blob = blobClient
-	sc.readTimeout = readTimeout
+	sc.ctx = ctx
 	if _, err := sc.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func (sc *azReader) seek(offset int64, whence int) (int64, error) {
 		o.Range.Count = sc.n - sc.off
 		o.Range.Offset = sc.off
 
-		resp, err := sc.blob.DownloadStream(context.Background(), &o)
+		resp, err := sc.blob.DownloadStream(sc.ctx, &o)
 		sc.resp = &resp
 		sc.err = err
 
@@ -224,7 +224,7 @@ func (sc *azReader) seek(offset int64, whence int) (int64, error) {
 		o.Range.Count = sc.n - sc.off
 		o.Range.Offset = sc.off
 
-		resp, err := sc.blob.DownloadStream(context.Background(), &o)
+		resp, err := sc.blob.DownloadStream(sc.ctx, &o)
 		sc.resp = &resp
 		sc.err = err
 
@@ -267,12 +267,11 @@ func (sc *azReader) close() error {
 }
 
 type azWriter struct {
-	blob         *blockblob.Client
-	mtx          sync.Mutex
-	n            int64
-	err          error
-	writeTimeout time.Duration
-	w            io.WriteCloser
+	blob *blockblob.Client
+	mtx  sync.Mutex
+	n    int64
+	err  error
+	w    io.WriteCloser
 }
 
 // NewAzureBlobWriteCloser returns an io.WriteCloser that can be used to write
@@ -280,7 +279,7 @@ type azWriter struct {
 func NewAzureBlobWriteCloser(
 	blobURL string,
 	creds azcore.TokenCredential,
-	retryTimeout time.Duration,
+	openTimeout time.Duration,
 	ctx context.Context,
 ) (*azWriter, error) {
 	if creds == nil {
@@ -294,7 +293,7 @@ func NewAzureBlobWriteCloser(
 
 	// Initialize client
 	var clientOpts blockblob.ClientOptions
-	clientOpts.Retry.TryTimeout = retryTimeout
+	clientOpts.Retry.TryTimeout = openTimeout
 	blobClient, err := blockblob.NewClient(u.String(), creds, &clientOpts)
 	if err != nil {
 		return nil, err
@@ -303,7 +302,6 @@ func NewAzureBlobWriteCloser(
 	// Init
 	var sc azWriter
 	sc.blob = blobClient
-	sc.writeTimeout = retryTimeout
 
 	r, w := io.Pipe()
 	go func() {
