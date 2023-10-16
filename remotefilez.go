@@ -119,7 +119,7 @@ func (ro *Opener) OpenWriterCtx(ctx context.Context, fileURL string) (io.WriteCl
 
 	switch u.Scheme {
 	case schemeFile:
-		return os.OpenFile(u.Path, os.O_WRONLY, 0666)
+		return os.OpenFile(u.Path, os.O_WRONLY|os.O_CREATE, 0666)
 	case schemeAzure:
 		if ro.azcreds == nil {
 			return nil, errors.New("missing credentials please add AzureResolver")
