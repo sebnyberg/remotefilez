@@ -16,6 +16,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/ory/dockertest"
+	"github.com/ory/dockertest/docker"
 	"github.com/sebnyberg/remotefilez"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +25,7 @@ import (
 // own version.
 const (
 	azTestFile    = "beowulf.txt"
-	azComposeMode = true
+	azComposeMode = false
 )
 
 // get an Azure Storage container URL
@@ -62,12 +63,12 @@ func getContainerURL(tb testing.TB) *url.URL {
 			"--blobHost",
 			"0.0.0.0",
 			"--cert",
-			"/testdata/0.0.0.0.pem",
+			"/certs/0.0.0.0.pem",
 			"--key",
-			"/testdata/0.0.0.0-key.pem",
+			"/certs/0.0.0.0-key.pem",
 		},
 		Mounts: []string{
-			fmt.Sprintf("%v/testdata:/testdata", os.Getenv("PWD")),
+			fmt.Sprintf("%v/certs:/certs", os.Getenv("PWD")),
 		},
 	})
 	require.NoError(tb, err)
@@ -85,25 +86,25 @@ func getContainerURL(tb testing.TB) *url.URL {
 	}
 
 	// Todo(sn) logger
-	// logWaiter, err := pool.Client.AttachToContainerNonBlocking(docker.AttachToContainerOptions{
-	// 	Container:    resource.Container.ID,
-	// 	OutputStream: os.Stdout,
-	// 	ErrorStream:  os.Stderr,
-	// 	Stdout:       true,
-	// 	Stderr:       true,
-	// 	Stream:       true,
-	// })
-	// require.NoError(tb, err)
-	// tb.Cleanup(func() {
-	// 	err = logWaiter.Close()
-	// 	if err != nil {
-	// 		tb.Fatalf("Could not close container log: %v", err)
-	// 	}
-	// 	err = logWaiter.Wait()
-	// 	if err != nil {
-	// 		tb.Fatalf("Could not wait for container log to close: %v", err)
-	// 	}
-	// })
+	logWaiter, err := pool.Client.AttachToContainerNonBlocking(docker.AttachToContainerOptions{
+		Container:    resource.Container.ID,
+		OutputStream: os.Stdout,
+		ErrorStream:  os.Stderr,
+		Stdout:       true,
+		Stderr:       true,
+		Stream:       true,
+	})
+	require.NoError(tb, err)
+	tb.Cleanup(func() {
+		err = logWaiter.Close()
+		if err != nil {
+			tb.Fatalf("Could not close container log: %v", err)
+		}
+		err = logWaiter.Wait()
+		if err != nil {
+			tb.Fatalf("Could not wait for container log to close: %v", err)
+		}
+	})
 
 	pool.MaxWait = 60 * time.Second
 	err = pool.Retry(func() (err error) {
@@ -151,6 +152,7 @@ func TestAzure(t *testing.T) {
 
 	// Get storage account connection
 	containerURL := getContainerURL(t)
+	time.Sleep(10 * time.Second)
 	blobURL := fmt.Sprintf("%v/%v", containerURL, azTestFile)
 
 	// Open remotefilez file

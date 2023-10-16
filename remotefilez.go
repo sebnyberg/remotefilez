@@ -15,6 +15,7 @@ import (
 type ReaderAtSeekCloser interface {
 	io.ReaderAt
 	io.ReadSeekCloser
+	Size() (int64, error)
 }
 
 const (
@@ -82,7 +83,11 @@ func (ro *Opener) OpenReaderCtx(ctx context.Context, fileURL string) (ReaderAtSe
 
 	switch u.Scheme {
 	case schemeFile:
-		return os.OpenFile(u.Path, os.O_RDWR, 0)
+		f, err := os.Open(u.Path)
+		if err != nil {
+			return nil, err
+		}
+		return &sizedFile{File: f}, nil
 	case schemeAzure:
 		if ro.azcreds == nil {
 			return nil, errors.New("missing credentials please add AzureResolver")
@@ -114,7 +119,7 @@ func (ro *Opener) OpenWriterCtx(ctx context.Context, fileURL string) (io.WriteCl
 
 	switch u.Scheme {
 	case schemeFile:
-		return os.OpenFile(u.Path, os.O_RDWR, 0)
+		return os.OpenFile(u.Path, os.O_WRONLY, 0666)
 	case schemeAzure:
 		if ro.azcreds == nil {
 			return nil, errors.New("missing credentials please add AzureResolver")

@@ -15,3 +15,5 @@
 # vendor/
 tmp*
 .DS_Store
+
+certs

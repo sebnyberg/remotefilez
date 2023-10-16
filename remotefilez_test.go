@@ -2,7 +2,6 @@ package remotefilez_test
 
 import (
 	"io"
-	"io/ioutil"
 	"os"
 	"testing"
 

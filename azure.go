@@ -19,6 +19,7 @@ import (
 var _ io.Closer = (*azReader)(nil)
 var _ io.Reader = (*azReader)(nil)
 var _ io.ReaderAt = (*azReader)(nil)
+var _ interface{ Size() (int64, error) } = (*azReader)(nil)
 var _ io.Closer = (*azWriter)(nil)
 var _ io.Writer = (*azWriter)(nil)
 
@@ -110,6 +111,10 @@ func (sc *azReader) Read(p []byte) (n int, err error) {
 	sc.mtx.Lock()
 	defer sc.mtx.Unlock()
 	return sc.read(p)
+}
+
+func (sc *azReader) Size() (int64, error) {
+	return sc.n, nil
 }
 
 // read is a concurrency-unsafe version of .Read(). You must hold sc.mtx before
