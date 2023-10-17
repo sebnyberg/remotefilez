@@ -3,10 +3,12 @@ package remotefilez
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"regexp"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -27,6 +29,14 @@ var (
 	ErrInvalidBlobURL = errors.New("invalid blob url")
 )
 
+type accounting struct {
+	readSz    [32]uint32
+	readCount uint32
+
+	readAtFastpath uint32
+	readAtSlowpath uint32
+}
+
 type azReader struct {
 	blob *blob.Client
 	resp *blob.DownloadStreamResponse
@@ -35,13 +45,17 @@ type azReader struct {
 	off  int64
 	err  error
 	ctx  context.Context
+
+	doAcct bool
+	acct   accounting
 }
 
 func NewAzureBlobReader(
+	ctx context.Context,
 	blobURL string,
 	creds azcore.TokenCredential,
 	openTimeout time.Duration,
-	ctx context.Context,
+	doAcct bool,
 ) (*azReader, error) {
 	if creds == nil {
 		return nil, errors.New("nil credentials")
@@ -53,9 +67,7 @@ func NewAzureBlobReader(
 	u.Scheme = "https"
 
 	// Initialize client
-	var clientOpts blob.ClientOptions
-	clientOpts.Retry.TryTimeout = openTimeout
-	blobClient, err := blob.NewClient(u.String(), creds, &clientOpts)
+	blobClient, err := blob.NewClient(u.String(), creds, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +88,10 @@ func NewAzureBlobReader(
 	sc.ctx = ctx
 	if _, err := sc.Seek(0, io.SeekStart); err != nil {
 		return nil, err
+	}
+
+	if doAcct {
+		sc.doAcct = true
 	}
 
 	return &sc, nil
@@ -108,6 +124,7 @@ func NewAzureBlobReader(
 //
 // Implementations must not retain p.
 func (sc *azReader) Read(p []byte) (n int, err error) {
+
 	sc.mtx.Lock()
 	defer sc.mtx.Unlock()
 	return sc.read(p)
@@ -120,6 +137,8 @@ func (sc *azReader) Size() (int64, error) {
 // read is a concurrency-unsafe version of .Read(). You must hold sc.mtx before
 // calling this function.
 func (sc *azReader) read(p []byte) (n int, err error) {
+	sc.accountRead(p)
+
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -144,17 +163,56 @@ func (sc *azReader) read(p []byte) (n int, err error) {
 	return n, nil
 }
 
+func (sc *azReader) accountRead(p []byte) {
+	if !sc.doAcct {
+		return
+	}
+	sz := len(p)
+	for i := 31; i >= 0; i-- {
+		if sz&(1<<i) > 0 {
+			atomic.AddUint32(&sc.acct.readSz[i], 1)
+			break
+		}
+	}
+	atomic.AddUint32(&sc.acct.readCount, 1)
+	if atomic.LoadUint32(&sc.acct.readCount)%10000 == 0 {
+		fmt.Printf("Read distribution\n")
+		for i := 31; i >= 0; i-- {
+			fmt.Printf("Sz: %v, Count: %v\n", 1<<i, atomic.LoadUint32(&sc.acct.readSz[i]))
+		}
+	}
+}
+
 func (sc *azReader) ReadAt(p []byte, off int64) (n int, err error) {
 	sc.mtx.Lock()
 	defer sc.mtx.Unlock()
 	if off == sc.off {
 		// fastpath
+		sc.acct.readAtFastpath++
 		return sc.read(p)
+	} else {
+		sc.acct.readAtSlowpath++
 	}
 	if _, err := sc.seek(off, io.SeekStart); err != nil {
 		return 0, err
 	}
 	return sc.read(p)
+}
+
+func (sc *azReader) readAtAccount(p []byte, off int64) {
+	if !sc.doAcct {
+		return
+	}
+	if off == sc.off {
+		sc.acct.readAtFastpath++
+	} else {
+		sc.acct.readAtSlowpath++
+	}
+	if (sc.acct.readAtFastpath+sc.acct.readAtSlowpath)%100000 == 0 {
+		fmt.Printf("ReadAt distribution\n")
+		fmt.Printf("Fastpath: %v\n", sc.acct.readAtFastpath)
+		fmt.Printf("Slowpath: %v\n", sc.acct.readAtSlowpath)
+	}
 }
 
 // Seek sets the offset for the next Read or Write to offset,
@@ -292,9 +350,7 @@ func NewAzureBlobWriteCloser(
 	u.Scheme = "https"
 
 	// Initialize client
-	var clientOpts blockblob.ClientOptions
-	clientOpts.Retry.TryTimeout = openTimeout
-	blobClient, err := blockblob.NewClient(u.String(), creds, &clientOpts)
+	blobClient, err := blockblob.NewClient(u.String(), creds, nil)
 	if err != nil {
 		return nil, err
 	}

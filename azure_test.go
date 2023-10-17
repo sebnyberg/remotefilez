@@ -152,7 +152,6 @@ func TestAzure(t *testing.T) {
 
 	// Get storage account connection
 	containerURL := getContainerURL(t)
-	time.Sleep(10 * time.Second)
 	blobURL := fmt.Sprintf("%v/%v", containerURL, azTestFile)
 
 	// Open remotefilez file
@@ -162,7 +161,7 @@ func TestAzure(t *testing.T) {
 	absURL.Scheme = "abs"
 	_, err = ro.Open(absURL.String())
 	require.Error(t, err, "should require abs scheme")
-	ro = *ro.WithAzureResolver(creds, 0)
+	ro = *ro.WithAzureResolver(creds, 0, false)
 
 	uploadOk := t.Run("upload", func(t *testing.T) {
 		w, err := ro.OpenWriterCtx(ctx, absURL.String())
